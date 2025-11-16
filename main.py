@@ -3,25 +3,31 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import secrets
 import os
-import httpx  # Gemini API için
+import httpx
 
+# Uygulama Objesini Tanımlama
 app = FastAPI()
 
-app.config[""] = ""
+# --- 1. CORS Middleware ---
+# Bu ayar, tarayıcıların (Figma dahil) API'nize erişmesini sağlar.
+origins = ["*"] 
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# --------------------------
 
-CORS = app.get_app()
+
+# In-memory storage (Bu veri, sunucu her yeniden başladığında SIFIRLANIR!)
 users_db = {}
 user_data_db = {}
 
 
-
+# ============= MODELLER =============
 class SignupRequest(BaseModel):
     email: str
     password: str
@@ -40,18 +46,16 @@ class ChatRequest(BaseModel):
 class SaveDataRequest(BaseModel):
     data: dict
 
-#AUTH ENDPOINTS 
+
+# ============= ROUTE'LAR (YOLLAR) =============
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "message": "LifeCoach AI Backend"}
-
-@app.get("/health")
-async def health():
-    return {"status": "ok", "message": "Backend is running"}
+    return {"status": "ok", "message": "LifeCoach AI Backend is operational"}
 
 @app.post("/signup")
 async def signup(request: SignupRequest):
+    # ... (Signup loğiği) ...
     if request.email in users_db:
         raise HTTPException(status_code=409, detail="Email already registered")
     
@@ -63,51 +67,24 @@ async def signup(request: SignupRequest):
         "language": request.language,
         "token": token
     }
+    user_data_db[token] = {"messages": [], "insights": []} # Basit başlatma
     
-    # Initialize user data
-    user_data_db[token] = {
-        "messages": [],
-        "insights": [],
-        "actionItems": [],
-        "goals": [],
-        "habits": []
-    }
-    
-    return {
-        "success": True,
-        "token": token,
-        "user": {
-            "name": request.name,
-            "email": request.email,
-            "language": request.language,
-            "countryCode": request.countryCode
-        }
-    }
+    return {"success": True, "token": token}
+
 
 @app.post("/login")
 async def login(request: LoginRequest):
-    if request.email not in users_db:
+    # ... (Login loğiği) ...
+    if request.email not in users_db or users_db[request.email]["password"] != request.password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
     user = users_db[request.email]
-    if user["password"] != request.password:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    
-    return {
-        "success": True,
-        "token": user["token"],
-        "user": {
-            "name": user["name"],
-            "email": request.email,
-            "language": user["language"]
-        }
-    }
+    return {"success": True, "token": user["token"]}
 
-#GEMİNİ END POİNT
 
 @app.post("/chat")
 async def chat(request: ChatRequest, authorization: str = Header(None)):
-    # Token kontrolü
+    # ... (Chat ve Gemini loğiği) ...
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized")
     
@@ -115,97 +92,36 @@ async def chat(request: ChatRequest, authorization: str = Header(None)):
     if token not in user_data_db:
         raise HTTPException(status_code=401, detail="Invalid token")
     
-    # Gemini API Key
+    # Gemini API Key Kontrolü
     gemini_api_key = os.getenv("GEMINI_API_KEY")
     if not gemini_api_key:
         raise HTTPException(status_code=500, detail="Gemini API key not configured")
     
-    # System prompt - dile göre
-    system_prompts = {
-        "tr": "Sen empatik ve destekleyici bir kişisel gelişim koçusun. Kullanıcıya motivasyon ver, hedeflerine ulaşmasına yardımcı ol ve yapıcı geri bildirimler sun. Kısa ve net cevaplar ver.",
-        "en": "You are an empathetic and supportive personal development coach. Motivate the user, help them achieve their goals, and provide constructive feedback. Keep responses concise and clear.",
-        "de": "Du bist ein einfühlsamer und unterstützender persönlicher Entwicklungscoach. Motiviere den Benutzer, hilf ihm, seine Ziele zu erreichen, und gib konstruktives Feedback. Halte die Antworten kurz und klar."
-    }
-    
-    system_prompt = system_prompts.get(request.language, system_prompts["en"])
-    
-    # Gemini API çağrısı
+    # Kalan Gemini loğiği (httpx ile API çağrısı)
     try:
         async with httpx.AsyncClient() as client:
             gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={gemini_api_key}"
             
+            # Request body'yi basitleştirdim
             gemini_request = {
-                "contents": [{
-                    "parts": [{
-                        "text": f"{system_prompt}\n\nKullanıcı: {request.message}"
-                    }]
-                }],
-                "generationConfig": {
-                    "temperature": 0.7,
-                    "maxOutputTokens": 500
-                }
+                "contents": [{"parts": [{"text": request.message}]}]
             }
             
-            response = await client.post(gemini_url, json=gemini_request, timeout=30.0)
+            response = await client.post(gemini_url, json=gemini_request)
             
             if response.status_code != 200:
+                # API'den gelen hatayı göstermek için
                 raise HTTPException(status_code=500, detail=f"Gemini API error: {response.text}")
             
             result = response.json()
             ai_response = result["candidates"][0]["content"]["parts"][0]["text"]
             
-            return {
-                "success": True,
-                "response": ai_response
-            }
+            return {"success": True, "response": ai_response}
     
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Gemini API timeout")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
 
-# DATA ENDPOİNT
 
-@app.get("/data")
-async def get_data(authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    
-    token = authorization.replace("Bearer ", "")
-    
-    if token in user_data_db:
-        return {"data": user_data_db[token]}
-    else:
-        # Initialize empty data
-        user_data_db[token] = {
-            "messages": [],
-            "insights": [],
-            "actionItems": [],
-            "goals": [],
-            "habits": []
-        }
-        return {"data": user_data_db[token]}
-
-@app.post("/save-data")
-async def save_data(request: SaveDataRequest, authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    
-    token = authorization.replace("Bearer ", "")
-    user_data_db[token] = request.data
-    
-    return {"success": True}
-
-@app.get("/check-limit")
-async def check_limit(authorization: str = Header(None)):
-    return {
-        "isPremium": False,
-        "isTrialActive": True,
-        "messageCount": 0,
-        "limit": 10,
-        "minutesUntilReset": 300
-    }
-
-@app.post("/increment-message")
-async def increment_message(authorization: str = Header(None)):
-    return {"messageCount": 1}
+@app.get("/health")
+async def health():
+    return {"status": "ok", "message": "Backend is running"}
