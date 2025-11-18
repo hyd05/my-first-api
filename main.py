@@ -1,6 +1,11 @@
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.middleware import SlowAPIMiddleware
+import os
+from dotenv import load_dotenv
 import secrets
 import os
 import httpx
@@ -125,3 +130,39 @@ async def chat(request: ChatRequest, authorization: str = Header(None)):
 @app.get("/health")
 async def health():
     return {"status": "ok", "message": "Backend is running"}
+
+load_dotenv()
+
+app = FastAPI(title="LifeCoach AI Backend")
+
+# Rate limiter
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(429, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+# CORS
+origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
+if origins == [""]:
+    origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+from routes import chat, deep_conversation, lifeplan, journal, payment
+
+app.include_router(chat.router)
+app.include_router(deep_conversation.router)
+app.include_router(lifeplan.router)
+app.include_router(journal.router)
+app.include_router(payment.router)
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
