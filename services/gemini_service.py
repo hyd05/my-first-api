@@ -1,4 +1,9 @@
 import os, httpx, asyncio
+import google.generativeai as genai
+from google.protobuf import descriptor as _descriptor
+from google.protobuf import message as _message
+from google.protobuf import text_format as _text_format
+
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateText"
 
@@ -22,3 +27,7 @@ async def generate_text(message: str) -> str:
             # fallback
             reply = data.get('output', [{}])[0].get('content', 'No reply')
         return reply
+
+def ask_gemini(prompt):
+    response = genai.GenerativeModel('gemini-pro').generate_content(prompt)
+    return response.text
