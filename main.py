@@ -7,7 +7,6 @@ from pydantic import BaseModel
 import os
 from dotenv import load_dotenv
 import secrets
-import httpx
 from pathlib import Path
 from typing import Any, Dict, Optional, List, Union
 
@@ -61,10 +60,6 @@ class LoginRequest(BaseModel):
     email: str
     password: str
 
-class ChatRequest(BaseModel):
-    message: str
-    language: str
-
 class SaveDataRequest(BaseModel):
     data: dict
 
@@ -102,37 +97,6 @@ async def login(request: LoginRequest):
     if not user or user["password"] != request.password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return {"success": True, "token": user["token"]}
-
-@app.post("/chat")
-async def chat(request: ChatRequest, authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Unauthorized: Missing or invalid token")
-
-    token = authorization.replace("Bearer ", "")
-    if token not in user_data_db:
-        raise HTTPException(status_code=401, detail="Unauthorized: Invalid token")
-
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
-    if not gemini_api_key:
-        raise HTTPException(status_code=500, detail="Gemini API key not configured")
-
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={gemini_api_key}",
-                json={"contents": [{"parts": [{"text": request.message}]}]},
-                timeout=30.0
-            )
-            response.raise_for_status()
-            result = response.json()
-            ai_response = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "No response found.")
-            return {"success": True, "response": ai_response}
-
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=502, detail=f"Gemini API error: {e.response.text}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
-
 
 @app.get("/health")
 async def health_check():

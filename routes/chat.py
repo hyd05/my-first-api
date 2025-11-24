@@ -2,10 +2,8 @@ from fastapi import APIRouter, Depends
 from models.request_models import ChatRequest
 from services.gemini_service import ask_gemini
 from services.security import get_current_user
-from services.gemini_service import ask_gemini
 
-
-router = APIRouter(prefix="/chat", tags=["Chat"])
+router = APIRouter()
 
 @router.post("/message")
 async def chat_message(req: ChatRequest, user=Depends(get_current_user)):
@@ -13,11 +11,3 @@ async def chat_message(req: ChatRequest, user=Depends(get_current_user)):
     prompt = "You are LifeCoach AI. Give a concise helpful answer.\nUser: " + req.prompt
     response = await ask_gemini(prompt, max_tokens=400)
     return {"response": response}
-
-router = APIRouter()
-
-@router.post("/chat")
-async def chat_endpoint(request: dict):
-    prompt = request.get("message", "")
-    response = ask_gemini(prompt)
-    return {"reply": response}

@@ -1,11 +1,11 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from services.payoneer_service import create_payout
+from services.stripe_service import create_charge
 
 router = APIRouter(prefix="/payment", tags=["payment"])
 
 class PaymentRequest(BaseModel):
-    email: str
+    payment_method_id: str
     amount: float
     currency: str = "USD"
     description: str = "LifeCoach AI Premium"
@@ -13,7 +13,7 @@ class PaymentRequest(BaseModel):
 @router.post("/")
 async def payment_endpoint(req: PaymentRequest):
     try:
-        data = await create_payout(req.email, req.amount, req.currency, req.description)
+        data = await create_charge(req.payment_method_id, req.amount, req.currency, req.description)
         return {"success": True, "data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
